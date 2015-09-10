@@ -88,6 +88,7 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    int64_t wake;                           /* Wake Time. */
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
@@ -109,6 +110,8 @@ extern bool thread_mlfqs;
 
 void thread_init (void);
 void thread_start (void);
+void check_blocked(int64_t ticks);
+void add_blocked(struct thread *t);
 
 void thread_tick (void);
 void thread_print_stats (void);

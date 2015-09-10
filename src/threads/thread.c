@@ -2,6 +2,7 @@
 #include <debug.h>
 #include <stddef.h>
 #include <random.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 #include "threads/flags.h"
@@ -28,11 +29,15 @@ static struct list ready_list;
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
 
+/* Blocked list. */
+static struct list blocked_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
 /* Initial thread, the thread running init.c:main(). */
 static struct thread *initial_thread;
+
 
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
@@ -91,6 +96,7 @@ thread_init (void)
 
   lock_init (&tid_lock);
   list_init (&ready_list);
+  list_init (&blocked_list);
   list_init (&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -137,6 +143,33 @@ thread_tick (void)
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
+}
+
+void check_blocked(int64_t ticks)
+{
+  struct list_elem *cur;
+  cur = list_begin(&blocked_list);
+  while(cur!=list_end(&blocked_list))
+  {
+    struct thread *t = list_entry(cur, struct thread, elem);
+    if((t->wake)<=ticks)
+    {
+      cur = list_remove (cur);
+      thread_unblock(t);
+    }
+    else
+    {
+      cur = list_next (cur);
+    }
+  }
+}
+
+void add_blocked(struct thread *t)
+{
+  if (t != idle_thread) 
+    {
+      list_push_back (&blocked_list, &t->elem);
+    }
 }
 
 /* Prints thread statistics. */
