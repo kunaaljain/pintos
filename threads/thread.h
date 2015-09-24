@@ -112,6 +112,9 @@ void thread_init (void);
 void thread_start (void);
 void check_blocked(int64_t ticks);
 void add_blocked(struct thread *t);
+bool insert_comp (const struct list_elem *a,
+                  const struct list_elem *b,
+                  void *aux);
 
 void thread_tick (void);
 void thread_print_stats (void);

@@ -159,16 +159,27 @@ void check_blocked(int64_t ticks)
     }
     else
     {
-      cur = list_next (cur);
+      return;
     }
   }
 }
+
+bool insert_comp (const struct list_elem *a,
+                  const struct list_elem *b,
+                  void *aux)
+{
+  struct thread *a1 = list_entry(a, struct thread, elem);
+  struct thread *b1 = list_entry(b, struct thread, elem);
+  return a1->wake < b1->wake;
+}
+
+list_less_func *insert_comp_typedef = insert_comp;
 
 void add_blocked(struct thread *t)
 {
   if (t != idle_thread) 
     {
-      list_push_back (&blocked_list, &t->elem);
+      list_insert_ordered (&blocked_list, &t->elem, insert_comp_typedef, NULL);
     }
 }
 
