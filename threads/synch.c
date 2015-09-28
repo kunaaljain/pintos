@@ -105,19 +105,28 @@ sema_try_down (struct semaphore *sema)
    and wakes up one thread of those waiting for SEMA, if any.
 
    This function may be called from an interrupt handler. */
+
 void
 sema_up (struct semaphore *sema) 
 {
+  static int a = 0;
+  a++;
   enum intr_level old_level;
 
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) 
-    thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
+  if (!list_empty (&sema->waiters)) {
+    struct list_elem *t = list_min(&sema->waiters,priority_comp,NULL);
+    struct thread *t1 = list_entry(t, struct thread, elem);
+    list_remove(t);
+ //  printf("%s %d\n",t1 ->name,t1->priority);
+    thread_unblock (list_entry (t,struct thread, elem));
+ //   if(a>10) print_top_ready_list();
+  }
   sema->value++;
   intr_set_level (old_level);
+  check_priority_yield();
 }
 
 static void sema_test_helper (void *sema_);
@@ -196,7 +205,14 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  if(lock->holder!=NULL)
+  {
+    thread_current ()->waiting = lock;
+    thread_waiting(thread_current());
+  }
+
   sema_down (&lock->semaphore);
+  thread_current() -> waiting = NULL;
   lock->holder = thread_current ();
 }
 
@@ -231,8 +247,24 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
+  enum intr_level old_level = intr_disable ();
+  lock->holder = NULL;
+  struct list_elem *cur;
+  cur = list_begin(&lock->semaphore.waiters);
+  while(cur!=list_end(&lock->semaphore.waiters))
+  {
+    struct thread *t = list_entry(cur, struct thread, elem);
+    if(t->priorelem.next!=NULL)
+    {
+      list_remove(&(t->priorelem));
+      (t->priorelem).next = (t->priorelem).prev = NULL;
+    }
+    cur = list_next(cur);
+  }
   lock->holder = NULL;
   sema_up (&lock->semaphore);
+  update_prior(thread_current());
+  intr_set_level( old_level );
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -249,6 +281,7 @@ lock_held_by_current_thread (const struct lock *lock)
 /* One semaphore in a list. */
 struct semaphore_elem 
   {
+    int priority;
     struct list_elem elem;              /* List element. */
     struct semaphore semaphore;         /* This semaphore. */
   };
@@ -262,6 +295,14 @@ cond_init (struct condition *cond)
   ASSERT (cond != NULL);
 
   list_init (&cond->waiters);
+}
+
+bool sema_comp (const struct list_elem *a,
+                  const struct list_elem *b,
+                  void *aux)
+{
+  return list_entry (a, struct semaphore_elem, elem)->priority >
+           list_entry (b, struct semaphore_elem, elem)->priority;
 }
 
 /* Atomically releases LOCK and waits for COND to be signaled by
@@ -295,7 +336,8 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
-  list_push_back (&cond->waiters, &waiter.elem);
+  waiter.priority = thread_get_priority();
+  list_insert_ordered (&cond->waiters, &waiter.elem, sema_comp, NULL);
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
@@ -319,6 +361,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   if (!list_empty (&cond->waiters)) 
     sema_up (&list_entry (list_pop_front (&cond->waiters),
                           struct semaphore_elem, elem)->semaphore);
+  update_prior(thread_current());
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by

@@ -94,6 +94,11 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
+    int orig_prior;
+    struct list_elem priorelem;
+    struct list priority_donations;
+    struct lock *waiting;
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -106,6 +111,7 @@ struct thread
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
+
 extern bool thread_mlfqs;
 
 void thread_init (void);
@@ -143,5 +149,17 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+void check_priority_yield();
+
+void print_top_ready_list();
+
+
+bool insert_comp (const struct list_elem *a,
+                  const struct list_elem *b,
+                  void *aux);
+bool priority_comp (const struct list_elem *a,
+                  const struct list_elem *b,
+                  void *aux);
 
 #endif /* threads/thread.h */
