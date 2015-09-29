@@ -205,7 +205,7 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  if(lock->holder!=NULL)
+  if(lock->holder!=NULL && !thread_mlfqs)
   {
     thread_current ()->waiting = lock;
     thread_waiting(thread_current());
@@ -249,21 +249,24 @@ lock_release (struct lock *lock)
 
   enum intr_level old_level = intr_disable ();
   lock->holder = NULL;
-  struct list_elem *cur;
-  cur = list_begin(&lock->semaphore.waiters);
-  while(cur!=list_end(&lock->semaphore.waiters))
+  if(!thread_mlfqs)
   {
-    struct thread *t = list_entry(cur, struct thread, elem);
-    if(t->priorelem.next!=NULL)
+    struct list_elem *cur;
+    cur = list_begin(&lock->semaphore.waiters);
+    while(cur!=list_end(&lock->semaphore.waiters))
     {
-      list_remove(&(t->priorelem));
-      (t->priorelem).next = (t->priorelem).prev = NULL;
+      struct thread *t = list_entry(cur, struct thread, elem);
+      if(t->priorelem.next!=NULL)
+      {
+        list_remove(&(t->priorelem));
+        (t->priorelem).next = (t->priorelem).prev = NULL;
+      }
+      cur = list_next(cur);
     }
-    cur = list_next(cur);
   }
   lock->holder = NULL;
   sema_up (&lock->semaphore);
-  update_prior(thread_current());
+  if(!thread_mlfqs) update_prior(thread_current());
   intr_set_level( old_level );
 }
 

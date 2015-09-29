@@ -12,6 +12,8 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/fixed_point.h"
+#include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -58,6 +60,7 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
+static int load_avg;
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -104,6 +107,7 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  load_avg = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -139,6 +143,13 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
+
+  if (thread_mlfqs)
+    {
+      t->recent_cpu += fixed_point_create (1, 1);
+      update_nice(t);
+      if (timer_ticks () % TIMER_FREQ == 0) recompute_load_avg();
+    }
 
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
@@ -250,6 +261,50 @@ void update_prior_1(struct thread *t)
 //	check_priority_yield();
 
 
+}
+
+void update_nice(struct thread *t)
+{
+	//priority = PRI_MAX - (recent_cpu / 4) - (nice * 2)
+	//printf("%d %d\n", fixed_point_round_nearest(t->recent_cpu/4), t->nice);
+	int p = PRI_MAX - fixed_point_round_nearest(t->recent_cpu/4) - (t->nice * 2);
+	if(p<=PRI_MIN) t->priority = PRI_MIN;
+	else if(p>=PRI_MAX) t->priority = PRI_MAX;
+	else t->priority = p;
+	//printf("%d\n", t->priority);
+	update_ready_list(t);
+}
+
+void update_nice_1(struct thread *t)
+{
+	//priority = PRI_MAX - (recent_cpu / 4) - (nice * 2)
+	t->priority = PRI_MAX - fixed_point_round_nearest(t->recent_cpu/4) - t->nice * 2;
+	//update_ready_list(t);
+}
+
+int count_ready_threads (void)
+{
+  int ready_threads = list_size (&ready_list) + ((running_thread()!= idle_thread)? 1 : 0); 
+  return ready_threads; 
+}
+
+void thread_update_recent_cpu (struct thread *t, void *aux UNUSED)
+{
+  int new_recent_cpu = fixed_point_divide (2 * load_avg, 2 * load_avg + fixed_point_create (1,1));
+  new_recent_cpu = fixed_point_multiply (t->recent_cpu, new_recent_cpu) + fixed_point_create(t->nice, 1);
+  t->recent_cpu = new_recent_cpu;
+  update_nice(t);
+}
+
+void recompute_load_avg (void)
+{
+//	printf("called\n");
+  int ready_threads = count_ready_threads ();
+ // printf("got load avg as %d and read threads as %d\n",thread_get_load_avg(), ready_threads );
+  load_avg = fixed_point_multiply (fixed_point_create (59, 60), load_avg) ;
+  load_avg += (fixed_point_create (1, 60) * ready_threads);
+ // printf("raw load avg %d\n",load_avg);
+  thread_foreach (thread_update_recent_cpu, NULL);
 }
 
 int max_priority()
@@ -527,33 +582,32 @@ thread_get_priority (void)
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int new_nice) 
 {
-  /* Not yet implemented. */
+	//printf("new nice is %d\n", new_nice);
+  thread_current() -> nice = new_nice;
+  update_nice(thread_current());
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return fixed_point_round_nearest(100*load_avg);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+	return fixed_point_round_nearest (100 * thread_current ()->recent_cpu);
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
